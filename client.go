@@ -14,16 +14,16 @@ import (
 )
 
 const (
-	// Time allowed to write a message to the peer.
+	// Время, отведенное на написание сообщения партнеру.
 	writeWait = 10 * time.Second
 
-	// Time allowed to read the next pong message from the peer.
+	// Время, отведенное на прочтение очередного сообщения от партнера.
 	pongWait = 60 * time.Second
 
-	// Send pings to peer with this period. Must be less than pongWait.
+	// Посылать пинги на пир с этим периодом. Должно быть меньше pongWait.
 	pingPeriod = (pongWait * 9) / 10
 
-	// Maximum message size allowed from peer.
+	// Максимально допустимый размер сообщения.
 	maxMessageSize = 512
 )
 
@@ -37,22 +37,20 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-// Client is a middleman between the websocket connection and the hub.
+// Клиент является посредником между соединением WebSocket и хабом.
 type Client struct {
 	hub *Hub
 
-	// The websocket connection.
+	// Соединение через веб-сокет.
 	conn *websocket.Conn
 
-	// Buffered channel of outbound messages.
+	// Буферизованный канал исходящих сообщений.
 	send chan []byte
 }
 
-// readPump pumps messages from the websocket connection to the hub.
-//
-// The application runs readPump in a per-connection goroutine. The application
-// ensures that there is at most one reader on a connection by executing all
-// reads from this goroutine.
+// Приложение запускает readPump в goroutine для каждого соединения. Приложение
+// гарантирует, что в соединении есть не более одного читателя, выполняя все
+// чтения из этой goroutine.
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -60,7 +58,11 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	c.conn.SetPongHandler(
+		func(string) error {
+			c.conn.SetReadDeadline(time.Now().Add(pongWait))
+			return nil
+		})
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
@@ -74,11 +76,11 @@ func (c *Client) readPump() {
 	}
 }
 
-// writePump pumps messages from the hub to the websocket connection.
+// writePump перекачивает сообщения из хаба в соединение WebSocket.
 //
-// A goroutine running writePump is started for each connection. The
-// application ensures that there is at most one writer to a connection by
-// executing all writes from this goroutine.
+// Для каждого соединения запускается goroutine, запускающая writePump.
+// Приложение гарантирует, что в соединении есть не более одного писателя,
+// выполняя все записи из этой goroutine.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -90,7 +92,7 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
+				// Хаб закрыл канал.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -101,7 +103,7 @@ func (c *Client) writePump() {
 			}
 			w.Write(message)
 
-			// Add queued chat messages to the current websocket message.
+			// Добавить сообщения чата из очереди к текущему сообщению веб-сокета.
 			n := len(c.send)
 			for i := 0; i < n; i++ {
 				w.Write(newline)
@@ -120,7 +122,7 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveWs handles websocket requests from the peer.
+// serveWs обрабатывает запросы websocket от пира.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -130,8 +132,8 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
 	client.hub.register <- client
 
-	// Allow collection of memory referenced by the caller by doing all work in
-	// new goroutines.
+	// Разрешить сбор памяти, на которую ссылается вызывающий, выполняя всю работу в
+	// новых горутинах.
 	go client.writePump()
 	go client.readPump()
 }
